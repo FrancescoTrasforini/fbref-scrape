@@ -179,84 +179,109 @@ def update_match_report_urls(df,urls,team):
     df.to_excel(filename, index=False)
     print(f"Updated {filename} with Match Report URLs.")
 
-def extract_player_stats(html, team):
-    respect_fbref_scrape_policy()  # Call the policy to ensure we wait before the next request
-    soup = BeautifulSoup(html, 'html.parser')
-    # Replace hyphens with spaces in the team variable for matching
-    team_with_space = team.replace("-"," ")  # Convert "-" to "\s+" (to match any whitespace in the caption)
-    # Adjust the regex to account for "FC" or similar before or after the team name
-    pattern = re.compile(
-        rf"(?:FC\s+|SC\s+|Football\s+Club\s+)?{re.escape(team_with_space)}(?:\s+FC|\s+SC|\s+Football\s+Club)?", 
-        re.IGNORECASE
-    )
-    
-    table = None
-    for tbl in soup.find_all('table'):
-        caption = tbl.find('caption')
-        if caption:
-            caption_text = caption.get_text(strip=True)
-            if pattern.search(caption_text):
-                table = tbl
-                break
-
-    if not table:
-        raise ValueError(f"Table with caption containing '{team}' not found.")
-    
-    # Skip the first tr (header with unnecessary grouping)
+# Helper function to extract data from a player stats table
+def extract_player_data(table):
     header_rows = table.find('thead').find_all('tr')
-    
     if len(header_rows) > 1:
-        # The second row contains the actual column names
+        # Use the second row for actual column names
         actual_headers_row = header_rows[1]
         headers = [header.text.strip() for header in actual_headers_row.find_all('th')]
     else:
-        # If there's no second row, fallback to the first row
+        # Fallback to the first row if only one row of headers exists
         headers = [header.text.strip() for header in header_rows[0].find_all('th')]
 
-    # Extract data rows
     rows = table.find('tbody').find_all('tr')
     data = []
-    
     for row in rows:
-        cells = [cell.text.strip() for cell in row.find_all(['td', 'th'])]  # Handle both headers and data
-        
-        # Replace empty values with 0
+        cells = [cell.text.strip() for cell in row.find_all(['td', 'th'])]
+        # Replace empty cells with 0
         cells = [cell if cell else '0' for cell in cells]
-        
         if cells:
             data.append(cells)
 
-    # Adjust columns dynamically based on the data
+    # Handle header/data column mismatch
     num_columns = len(data[0]) if data else 0
     if num_columns != len(headers):
-        # Handle cases where data and headers mismatch
         print(f"Warning: Mismatch between headers ({len(headers)}) and data columns ({num_columns}). Adjusting headers.")
-        headers = headers[:num_columns]  # Truncate headers to match data if necessary
+        headers = headers[:num_columns]
+    
+    return pd.DataFrame(data, columns=headers)
 
-    df = pd.DataFrame(data, columns=headers)
-    return df
+def extract_player_stats(html, team, opponent):
+    respect_fbref_scrape_policy()  # Enforce FBref scrape policy
+    soup = BeautifulSoup(html, 'html.parser')
 
-# Save the scraped match report table to a new Excel file
-def save_report(df, team, opponent, match_number):
+    # Prepare team and opponent names
+    teams = [team, opponent]
+    dfs = []
+
+    for team_name in teams:
+        team_with_space = team_name.replace("-", " ")
+        pattern = re.compile(
+            rf"(?:FC\s+|SC\s+|Football\s+Club\s+)?{re.escape(team_with_space)}(?:\s+FC|\s+SC|\s+Football\s+Club)?",
+            re.IGNORECASE
+        )
+
+        # Find the tables corresponding to the team or opponent
+        tables = {'Player Stats': None, 'Goalkeeper Stats': None}
+        for tbl in soup.find_all('table'):
+            caption = tbl.find('caption')
+            if caption:
+                caption_text = caption.get_text(strip=True)
+                for key in tables:
+                    if pattern.search(caption_text) and key in caption_text:
+                        tables[key] = tbl
+
+        # Check for missing tables
+        for key, table in tables.items():
+            if not table:
+                raise ValueError(f"Table with caption containing '{team_with_space}' and '{key} Table' not found.")
+        
+        # Extract data from the tables and append DataFrames
+        for key in tables:
+            df = extract_player_data(tables[key])
+            dfs.append(df)
+    
+    return dfs
+
+# Save the scraped match report tables to a new Excel file with multiple sheets
+def save_report(dfs, team, opponent, match_number):
+    # Create folder path if it doesn't exist
     folder_path = f"Match-Reports\{team}"
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
     
+    # Define filename and full file path
     filename = f"Report Matchday {match_number} - {team} - {opponent}.xlsx"
     file_path = os.path.join(folder_path, filename)
-    df.to_excel(file_path, index=False)
+    
+    # Save each dataframe in a separate sheet
+    with pd.ExcelWriter(file_path, engine='xlsxwriter') as writer:
+        # Define sheet names for each DataFrame
+        sheet_names = [
+            f"{team} Players",
+            f"{team} Goalkeeper",
+            f"{opponent} Players",
+            f"{opponent} Goalkeeper"
+        ]
+        
+        # Iterate over the list of dataframes and save each one to a different sheet
+        for i, df in enumerate(dfs):
+            # Ensure sheet names match the order and number of DataFrames
+            sheet_name = sheet_names[i]
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+    
     print(f"Saved match report to {file_path}")
     return file_path
 
-# Scrape and save each match report as a new Excel file
-def scrape_and_save_reports(df,driver,team):
+def scrape_and_save_reports(df, driver, team):
     
     for index, row in df.iterrows():
         match_report_url = row["Match Report"]
         opponent = row["Opponent"]
         opponent_normalized = normalize_team_name(opponent)
         match_number = index + 1  # Match number as a unique identifier
-        
+
         # Skip if there's no valid match report URL
         if not pd.isna(match_report_url):
             
@@ -269,12 +294,18 @@ def scrape_and_save_reports(df,driver,team):
             
             # Load match report page
             html = get_page_content(driver, match_report_url)
-            match_report_df = extract_player_stats(html,team)
             
-            if match_report_df is not None:
-                # Save the scraped table to a new Excel file
-                file_path = save_report(match_report_df, team, opponent_normalized, match_number)
-                
+            # Extract list of DataFrames (team and opponent)
+            dfs = extract_player_stats(html, team, opponent_normalized)
+            
+            # Check if both DataFrames are present
+            if all(df is not None for df in dfs):
+                # remove "-" from team name
+                team_with_space = team.replace("-", " ")
+                opponent_with_space = opponent_normalized.replace("-", " ")
+                # Save all DataFrames into the same Excel file, in different sheets
+                file_path = save_report(dfs, team_with_space, opponent_with_space, match_number)
+
                 # Optionally update the main Excel file with file paths or other metadata
                 df.at[index, "Match Report"] = file_path
             
