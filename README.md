@@ -8,8 +8,9 @@ Current project status:
 3) Match Reports are now complete with both team players and goalkeepers data
 
 Next features: 
-1) Allow scraping of the selected league whole at once
-2) Web app
-3) Make Real DB 
+1) Allow user to selected league to be scraped
+2) Scrape the whole league at once
+3) Web app
+4) Make Real DB 
 
 Note: the project follows fbref scraping policy, which allows a maximum of 10 requests per minute.
