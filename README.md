@@ -11,6 +11,7 @@ Next features:
 1) Allow user to selected league to be scraped
 2) Scrape the whole league at once
 3) Web app
-4) Make Real DB 
+4) Make Real DB
+5) Regularly scrape for data updates
 
 Note: the project follows fbref scraping policy, which allows a maximum of 10 requests per minute.
