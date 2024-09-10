@@ -1,6 +1,7 @@
 import time
 import pandas as pd
 import os
+import json
 import re
 import requests
 from selenium import webdriver
@@ -9,6 +10,8 @@ from selenium.webdriver.edge.options import Options
 from webdriver_manager.microsoft import EdgeChromiumDriverManager
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
+from rapidfuzz import process
+from functools import lru_cache
 
 # Initialize Selenium WebDriver
 def init_webdriver():
@@ -348,3 +351,128 @@ def load_team_urls():
     else:
         print(f"File {filename} does not exist.")
         return None
+    
+def load_cache(cache_file):
+    """Load cached URLs from a JSON file."""
+    if os.path.exists(cache_file):
+        with open(cache_file, 'r') as file:
+            return json.load(file)
+    return {}
+
+def save_cache(_dict, cache_file):
+    """Save URLs to a JSON file for caching."""
+    with open(cache_file, 'w') as file:
+        json.dump(_dict, file)
+
+# Function to scrape league links from FBref's main competitions page
+def scrape_league_links_from_fbref():
+    url = "https://fbref.com/en/comps/"  # FBref competitions page
+    response = requests.get(url)
+    if response.status_code != 200:
+        print(f"Failed to retrieve FBref page. Status code: {response.status_code}")
+        return {}
+
+    soup = BeautifulSoup(response.text, 'html.parser')
+    
+    league_dict = {}
+    
+    # Find the table containing the top tier information
+    top_leagues_table = soup.find('table', {'id': 'comps_1_fa_club_league_senior'})
+    if not top_leagues_table:
+        print("Could not find the top tier leagues table on the page.")
+        return {}
+    
+    # Loop through all rows in the table to extract league names and URLs
+    for row in top_leagues_table.find('tbody').find_all('th'):
+        league_link_tag = row.find('a')  # Find the link for the league
+        if league_link_tag:
+            league_name = league_link_tag.text.strip()
+            league_url = 'https://fbref.com' + league_link_tag['href']
+            league_dict[league_name] = league_url
+    
+    # Find the table containing the second tier information
+    second_leagues_table = soup.find('table', {'id': 'comps_2_fa_club_league_senior'})
+    if not second_leagues_table:
+        print("Could not find the second tier leagues table on the page.")
+        return {}
+    
+    # Loop through all rows in the table to extract league names and URLs
+    for row in second_leagues_table.find('tbody').find_all('th'):
+        league_link_tag = row.find('a')  # Find the link for the league
+        if league_link_tag:
+            league_name = league_link_tag.text.strip()
+            league_url = 'https://fbref.com' + league_link_tag['href']
+            league_dict[league_name] = league_url   
+             
+    return league_dict
+
+# Function to get league links, using caching to avoid redundant scraping
+@lru_cache(maxsize=32)  # Caches the result in memory for 32 different league scrapes
+def get_league_links(cache_file):
+    #"""Scrapes the league URLs or loads them from cache."""
+    league_dict = load_cache(cache_file)  # First try to load from cache
+    if not league_dict:  # If cache is empty, scrape the league URLs
+        # Placeholder for scraping logic
+        # Example: league_dict = {'K League 1': 'https://fbref.com/en/comps/55/K-League-1'}
+        league_dict = scrape_league_links_from_fbref()  # Your scraping function here
+        save_cache(league_dict,cache_file)  # Save the newly scraped league URLs to cache
+    return league_dict
+
+# Fuzzy matching to get the closest league name
+def get_closest_league(input_league,cache_file):
+    league_dict = get_league_links(cache_file)  # Fetch the league dictionary, either from cache or by scraping
+    league_names = list(league_dict.keys())  # List of league names
+    closest_match = process.extractOne(input_league, league_names)  # Fuzzy match
+
+    if closest_match and closest_match[1] > 80:  # Set a threshold for accuracy (80% in this case)
+        return closest_match[0], league_dict[closest_match[0]]  # Return the match and its URL
+    return None, None
+
+# Function to scrape league links from FBref's main competitions page
+def scrape_season_links_from_fbref(league_url):
+    print(f"League URL: {league_url}") #debugging
+    response = requests.get(league_url)
+    if response.status_code != 200:
+        print(f"Failed to retrieve FBref page. Status code: {response.status_code}")
+        return {}
+
+    soup = BeautifulSoup(response.text, 'html.parser')
+    
+    seasons_dict = {}
+    
+    # Find the table containing the seasons
+    seasons_table = soup.find('table', {'id': 'seasons'})
+    if not seasons_table:
+        print("Could not find the season table on the page.")
+        return {}
+    
+    # Loop through all rows in the table to extract seasons and URLs
+    for row in seasons_table.find('tbody').find_all('th'):
+        season_link_tag = row.find('a')  # Find the link for the season
+        if season_link_tag:
+            season_name = season_link_tag.text.strip()
+            season_url = 'https://fbref.com' + season_link_tag['href']
+            seasons_dict[season_name] = season_url  
+             
+    return seasons_dict
+
+# Function to get season links, using caching to avoid redundant scraping
+@lru_cache(maxsize=64)  # Caches the result in memory for 64 different season scrapes
+def get_season_links(cache_file,league_url):
+    #"""Scrapes the season URLs or loads them from cache."""
+    season_dict = load_cache(cache_file)  # First try to load from cache
+    if not season_dict:  # If cache is empty, scrape the season URLs
+        season_dict = scrape_season_links_from_fbref(league_url)  
+        save_cache(season_dict,cache_file)  # Save the newly scraped league URLs to cache
+    return season_dict
+
+def get_season_url(season,cache_file,league_url):
+    season_dict = get_season_links(cache_file,league_url)  # Fetch the league dictionary, either from cache or by scraping
+    seasons_list = list(season_dict.keys())  # List of league names
+    closest_match = process.extractOne(season, seasons_list)  # Fuzzy match
+
+    if closest_match and closest_match[1] > 80:  # Set a threshold for accuracy (80% in this case)
+        return closest_match[0], season_dict[closest_match[0]]  # Return the match and its URL
+    return None, None
+
+
