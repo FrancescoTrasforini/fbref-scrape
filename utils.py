@@ -2,6 +2,7 @@ import time
 import pandas as pd
 import os
 import re
+import requests
 from selenium import webdriver
 from selenium.webdriver.edge.service import Service
 from selenium.webdriver.edge.options import Options
