@@ -8,7 +8,7 @@ Current project status:
 3) Match Reports are now complete with both team players and goalkeepers data
 
 Next features: 
-1) Allow user to selected league to be scraped
+1) [In progress] Allow user to selected league to be scraped -> add filter for man/women competition -> scraping of fixtures + scraping of reports 
 2) Scrape the whole league at once
 3) Web app
 4) Make Real DB
