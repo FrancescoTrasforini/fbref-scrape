@@ -15,8 +15,8 @@ Next features:
 3) User Interface
 
 File structure will be:
-1)Main_Directory\{competition_name}-{gender}\{season}\{competition_name}_{season}.xlsx
-2)Main_Directory\{competition_name}-{gender}\{season}\{Team}\{Team_data}_{season}.xlsx
-3)Main_Directory\{competition_name}-{gender}\{season}\{Team}\Match Report-{match_number}-{Team}_{Opponent}_.xlsx
+1) Main_Directory\{competition_name}-{gender}\{season}\{competition_name}_{season}.xlsx
+2) Main_Directory\{competition_name}-{gender}\{season}\{Team}\{Team_data}_{season}.xlsx
+3) Main_Directory\{competition_name}-{gender}\{season}\{Team}\Match Report-{match_number}-{Team}_{Opponent}_.xlsx
 
 Note: the project follows fbref scraping policy, which allows a maximum of 10 requests per minute.
