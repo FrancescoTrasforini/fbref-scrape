@@ -364,47 +364,59 @@ def save_cache(_dict, cache_file):
     with open(cache_file, 'w') as file:
         json.dump(_dict, file)
 
-# Function to scrape league links from FBref's main competitions page
 def scrape_league_links_from_fbref():
     url = "https://fbref.com/en/comps/"  # FBref competitions page
     response = requests.get(url)
     if response.status_code != 200:
         print(f"Failed to retrieve FBref page. Status code: {response.status_code}")
-        return {}
+        return {}, {}  # Return two empty dictionaries
 
     soup = BeautifulSoup(response.text, 'html.parser')
     
-    league_dict = {}
+    men_league_dict = {}
+    women_league_dict = {}
     
     # Find the table containing the top tier information
     top_leagues_table = soup.find('table', {'id': 'comps_1_fa_club_league_senior'})
     if not top_leagues_table:
         print("Could not find the top tier leagues table on the page.")
-        return {}
     
-    # Loop through all rows in the table to extract league names and URLs
-    for row in top_leagues_table.find('tbody').find_all('th'):
-        league_link_tag = row.find('a')  # Find the link for the league
-        if league_link_tag:
-            league_name = league_link_tag.text.strip()
-            league_url = 'https://fbref.com' + league_link_tag['href']
-            league_dict[league_name] = league_url
+    # Loop through all rows in the table to extract league names, URLs, and genders
+    for row in top_leagues_table.find('tbody').find_all('tr'):
+        columns = row.find_all('td')
+        headers = row.find_all('th')
+        if len(headers) > 0 and len(columns) > 0:
+            league_gender = columns[0].text.strip()  # Extract gender from the first td
+            league_link_tag = headers[0].find('a')  # Find the link for the league in th
+            if league_link_tag:
+                league_name = league_link_tag.text.strip()
+                league_url = 'https://fbref.com' + league_link_tag['href']
+                if league_gender == 'M':
+                    men_league_dict[league_name] = {'url': league_url, 'gender': league_gender}
+                elif league_gender == 'F':
+                    women_league_dict[league_name] = {'url': league_url, 'gender': league_gender}
     
     # Find the table containing the second tier information
     second_leagues_table = soup.find('table', {'id': 'comps_2_fa_club_league_senior'})
     if not second_leagues_table:
         print("Could not find the second tier leagues table on the page.")
-        return {}
     
-    # Loop through all rows in the table to extract league names and URLs
-    for row in second_leagues_table.find('tbody').find_all('th'):
-        league_link_tag = row.find('a')  # Find the link for the league
-        if league_link_tag:
-            league_name = league_link_tag.text.strip()
-            league_url = 'https://fbref.com' + league_link_tag['href']
-            league_dict[league_name] = league_url   
-             
-    return league_dict
+    # Loop through all rows in the table to extract league names, URLs, and genders
+    for row in second_leagues_table.find('tbody').find_all('tr'):
+        columns = row.find_all('td')
+        headers = row.find_all('th')
+        if len(headers) > 0 and len(columns) > 0:
+            league_gender = columns[0].text.strip()  # Extract gender from the first td
+            league_link_tag = headers[0].find('a')  # Find the link for the league in th
+            if league_link_tag:
+                league_name = league_link_tag.text.strip()
+                league_url = 'https://fbref.com' + league_link_tag['href']
+                if league_gender == 'M':
+                    men_league_dict[league_name] = {'url': league_url, 'gender': league_gender}
+                elif league_gender == 'F':
+                    women_league_dict[league_name] = {'url': league_url, 'gender': league_gender}
+    
+    return men_league_dict, women_league_dict
 
 # Function to get league links, using caching to avoid redundant scraping
 @lru_cache(maxsize=32)  # Caches the result in memory for 32 different league scrapes
@@ -418,14 +430,27 @@ def get_league_links(cache_file):
         save_cache(league_dict,cache_file)  # Save the newly scraped league URLs to cache
     return league_dict
 
-# Fuzzy matching to get the closest league name
-def get_closest_league(input_league,cache_file):
-    league_dict = get_league_links(cache_file)  # Fetch the league dictionary, either from cache or by scraping
-    league_names = list(league_dict.keys())  # List of league names
+# Fuzzy matching to get the closest league name with the specified gender
+def get_closest_league(input_league, cache_file, gender):
+    men_dict, women_dict = get_league_links(cache_file)  # Fetch the league dictionaries
+    
+    # Select the appropriate dictionary based on gender
+    if gender.upper() == 'M':
+        league_dict = men_dict
+    elif gender.upper() == 'F':
+        league_dict = women_dict
+    else:
+        print("Invalid gender specified. Use 'M' for men or 'F' for women.")
+        return None, None
+    
+    league_names = list(league_dict.keys())  # List of league names after filtering
     closest_match = process.extractOne(input_league, league_names)  # Fuzzy match
 
     if closest_match and closest_match[1] > 80:  # Set a threshold for accuracy (80% in this case)
-        return closest_match[0], league_dict[closest_match[0]]  # Return the match and its URL
+        league_name = closest_match[0]
+        league_info = league_dict[league_name]  # Get the league's URL and gender
+        return league_name, league_info  # Return the match and its URL and gender
+
     return None, None
 
 # Function to scrape league links from FBref's main competitions page
