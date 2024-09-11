@@ -4,6 +4,7 @@ import os
 import json
 import re
 import requests
+import openpyxl
 from selenium import webdriver
 from selenium.webdriver.edge.service import Service
 from selenium.webdriver.edge.options import Options
@@ -500,4 +501,55 @@ def get_season_url(season,cache_file,league_url):
         return closest_match[0], season_dict[closest_match[0]]  # Return the match and its URL
     return None, None
 
+def scrape_competition_tables(competition_url, output_file):
+    response = requests.get(competition_url)
+    if response.status_code != 200:
+        print(f"Failed to retrieve the page. Status code: {response.status_code}")
+        return
+    
+    soup = BeautifulSoup(response.text, 'html.parser')
+    tables = soup.find_all('table')  # Find all tables on the page
 
+    writer = pd.ExcelWriter(output_file, engine='openpyxl')
+    
+    for idx, table in enumerate(tables):
+        # Extract caption from the current table
+        caption_tag = table.find('caption')  # This looks for caption inside the table
+        if not caption_tag:
+            print(f"Skipping table {idx+1} (no caption found)")
+            continue
+        
+        caption = caption_tag.text.strip()
+        
+        # Extract table headers and rows
+        headers = []
+        rows = []
+        
+        thead = table.find('thead')
+        tbody = table.find('tbody')
+        
+        # Skip multi-level headers and extract column names from the second header row
+        if thead:
+            header_rows = thead.find_all('tr')
+            if len(header_rows) > 1:
+                headers = [th.text.strip() for th in header_rows[1].find_all('th')]
+            else:
+                headers = [th.text.strip() for th in header_rows[0].find_all('th')]
+        
+        # Extract all data rows
+        if tbody:
+            for row in tbody.find_all('tr'):
+                cells = [td.text.strip() if td.text.strip() != '' else '0' for td in row.find_all(['td', 'th'])]  # Replace empty cells with '0'
+                rows.append(cells)
+        
+        # Create a DataFrame from the scraped data
+        df = pd.DataFrame(rows, columns=headers)
+
+        # Fill any remaining NaN values with 0 (in case of unbalanced rows or missing data)
+        df.fillna(0, inplace=True)
+        
+        # Save the DataFrame to a sheet named after the table caption
+        sheet_name = caption[:31]  # Excel sheet names are limited to 31 characters
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+    writer.close()
