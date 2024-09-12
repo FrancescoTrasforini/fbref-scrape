@@ -7,12 +7,16 @@ Current project status:
 2) Scrape-Match-Reports: use -> retrieve player stats from user selected K League 1 team from each match report. Save the scraped data in folder \Match-Reports\{selected-team}
 3) Match Reports are now complete with both team players and goalkeepers data
 4) Allow user to select league and filter by gender
+5) Scraping of competition relative tables
 
 Next features: 
-1) [In progress] Allow user to selected league to be scraped -> add filter for man/women competition -> scraping of fixtures + scraping of reports 
+1) [In progress] Automatic scraping of fixtures and reports from the selected league+season
 2) Scrape the whole league at once
-3) Web app
-4) Make Real DB
-5) Regularly scrape for data updates
+3) User Interface
+
+File structure will be:
+1) Main_Directory\{competition_name}-{gender}\{season}\{competition_name}_{season}.xlsx
+2) Main_Directory\{competition_name}-{gender}\{season}\{Team}\{Team_data}_{season}.xlsx
+3) Main_Directory\{competition_name}-{gender}\{season}\{Team}\Match Report-{match_number}-{Team}_{Opponent}_.xlsx
 
 Note: the project follows fbref scraping policy, which allows a maximum of 10 requests per minute.
