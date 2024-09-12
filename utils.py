@@ -501,55 +501,126 @@ def get_season_url(season,cache_file,league_url):
         return closest_match[0], season_dict[closest_match[0]]  # Return the match and its URL
     return None, None
 
-def scrape_competition_tables(competition_url, output_file):
+def get_scores_and_fixtures_url(competition_url):
+    # Send a request to the competition page
     response = requests.get(competition_url)
     if response.status_code != 200:
         print(f"Failed to retrieve the page. Status code: {response.status_code}")
-        return
+        return None
     
     soup = BeautifulSoup(response.text, 'html.parser')
-    tables = soup.find_all('table')  # Find all tables on the page
-
-    writer = pd.ExcelWriter(output_file, engine='openpyxl')
     
-    for idx, table in enumerate(tables):
-        # Extract caption from the current table
-        caption_tag = table.find('caption')  # This looks for caption inside the table
-        if not caption_tag:
-            print(f"Skipping table {idx+1} (no caption found)")
+    # Find the div with id "inner_nav" and look for the "Scores & Fixtures" link
+    inner_nav = soup.find('div', {'id': 'inner_nav'})
+    if not inner_nav:
+        print("Could not find the 'inner_nav' section.")
+        return None
+
+    scores_link_tag = inner_nav.find('a', string="Scores & Fixtures")
+    if not scores_link_tag:
+        print("Could not find the 'Scores & Fixtures' link.")
+        return None
+    
+    # Extract the relative URL and create the full URL
+    scores_fixtures_url = 'https://fbref.com' + scores_link_tag['href']
+    
+    return scores_fixtures_url
+
+def scrape_page_tables(url, output_file, table_card_position):
+    """
+    Scrape tables from the given URL and save to an Excel file. 
+    The table_card_position determines if the scraped tables are in the "left" or "right" container.
+    """
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    # Find all divs that have class "table_container"
+    tables_div = soup.find_all('div', class_='table_container')
+
+    if not tables_div:
+        print(f"No tables found.")
+        return
+    
+    # Initialize the Excel writer
+    writer = pd.ExcelWriter(output_file, engine='openpyxl')
+
+    for div in tables_div:
+        # Check if the div belongs to the "left" or "right" card based on the presence of "current"
+        is_left_card = 'current' in div.get('class', [])
+
+        # Continue only if the current div matches the specified table_card_position
+        if (table_card_position == "left" and not is_left_card) or (table_card_position == "right" and is_left_card):
             continue
-        
+
+        # Ensure the div contains a table
+        table = div.find('table')
+        if not table:
+            continue
+
+        # Extract the caption
+        caption_tag = table.find('caption')
+        if not caption_tag:
+            continue
+
         caption = caption_tag.text.strip()
-        
+
         # Extract table headers and rows
         headers = []
         rows = []
         
-        thead = table.find('thead')
-        tbody = table.find('tbody')
-        
-        # Skip multi-level headers and extract column names from the second header row
-        if thead:
-            header_rows = thead.find_all('tr')
-            if len(header_rows) > 1:
-                headers = [th.text.strip() for th in header_rows[1].find_all('th')]
-            else:
-                headers = [th.text.strip() for th in header_rows[0].find_all('th')]
-        
-        # Extract all data rows
-        if tbody:
-            for row in tbody.find_all('tr'):
-                cells = [td.text.strip() if td.text.strip() != '' else '0' for td in row.find_all(['td', 'th'])]  # Replace empty cells with '0'
-                rows.append(cells)
-        
-        # Create a DataFrame from the scraped data
-        df = pd.DataFrame(rows, columns=headers)
+        # Extract table headers and rows
+        header_rows = table.find('thead').find_all('tr')
+        if len(header_rows) > 1:
+            # Use the second row for actual column names if there are two rows
+            headers = [header.text.strip() for header in header_rows[1].find_all('th')]
+        else:
+            # Fallback to the first row if only one row of headers exists
+            headers = [header.text.strip() for header in header_rows[0].find_all('th')]
+        #if header_rows:
+        #    if len(header_rows) > 1:
+        #        # Use the second row for actual column names
+        #        actual_headers_row = header_rows[1]
+        #        headers = [header.text.strip() for header in actual_headers_row.find_all('th')]
+        #    else:
+        #        # Fallback to the first row if only one row of headers exists
+        #        headers = [header.text.strip() for header in header_rows[0].find_all('th')]
 
+        # Extract rows
+        body = table.find('tbody')
+        if body:
+            for row in body.find_all('tr'):
+                cells = [cell.text.strip() for cell in row.find_all(['td', 'th'])]
+                rows.append(cells)
+                # Replace empty cells with 0
+                #cells = [cell if cell else '0' for cell in cells]
+                #if cells:
+                #    rows.append(cells)
+
+        # Handle header/data column mismatch
+        num_columns = len(rows[0]) if rows else 0
+        if num_columns != len(headers):
+            print(f"Warning: Mismatch between headers ({len(headers)}) and data columns ({num_columns}). Adjusting headers.")
+            headers = headers[:num_columns]
+        
+        # Create DataFrame
+        try:
+            df = pd.DataFrame(rows, columns=headers)
+        except ValueError as e:
+            print(f"Error creating DataFrame: {e}")
+            continue
+
+        # Drop rows where all values are NaN
+        df.dropna(how='all', inplace=True)
+        
         # Fill any remaining NaN values with 0 (in case of unbalanced rows or missing data)
         df.fillna(0, inplace=True)
         
-        # Save the DataFrame to a sheet named after the table caption
+        # Write each table to a different sheet named after the caption
         sheet_name = caption[:31]  # Excel sheet names are limited to 31 characters
         df.to_excel(writer, sheet_name=sheet_name, index=False)
 
     writer.close()
+
+
+
+
