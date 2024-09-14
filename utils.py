@@ -13,6 +13,90 @@ from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from rapidfuzz import process
 from functools import lru_cache
+from fuzzywuzzy import fuzz
+
+# competitions dictionary
+
+league_mapping = {
+    "Liga Profesional de Fútbol Argentina": "Liga Argentina",
+    "A-League Men": "A-League",
+    "A-League Women": "A-League",
+    "Austrian Football Bundesliga": "Bundesliga",
+    "ÖFB Frauen-Bundesliga": "ÖFB Frauenliga",
+    "Belgian Pro League": "Pro League A",
+    "Belgian Women's Super League": "Belgian WSL",
+    "División de Fútbol Profesional": "Primera División",
+    "Campeonato Brasileiro Série A": "Série A",
+    "Brasileirão Feminino Série A1": "Série A1",
+    "First Professional Football League": "First League",
+    "Canadian Premier League": "CanPL",
+    "Chilean Primera División": "Primera División",
+    "Chinese Football Association Super League": "Super League",
+    "Categoría Primera A": "Primera A",
+    "Croatian Football League": "HNL",
+    "Czech First League": "Czech First League",
+    "Danish Superliga": "Danish Superliga",
+    "Danish Women's League": "Kvindeligaen",
+    "Liga Profesional Ecuador": "Serie A",
+    "Premier League": "Premier League",
+    "FA Women's Super League": "WSL",
+    "La Liga": "La Liga",
+    "Liga F": "Liga F",
+    "Veikkausliiga": "Veikkausliiga",
+    "Ligue 1": "Ligue 1",
+    "Première Ligue": "D1 Fém",
+    "Fußball-Bundesliga": "Bundesliga",
+    "Frauen-Bundesliga": "Bundesliga",
+    "Super League Greece": "Super League",
+    "Nemzeti Bajnokság I": "NB I",
+    "Indian Super League": "Super League",
+    "Persian Gulf Pro League": "Pro League",
+    "Serie A": "Serie A",
+    "J1 League": "J1 League",
+    "Women Empowerment League": "WE League",
+    "K League 1": "K League",
+    "Saudi Professional League": "Saudi Professional League",
+    "Liga MX": "Liga MX",
+    "Eredivisie": "Eredivisie",
+    "Eredivisie Vrouwen": "Eredivisie",
+    "Eliteserien": "Eliteserien",
+    "Toppserien": "Toppserien",
+    "Paraguayan Primera División": "Primera Div",
+    "Liga 1 de Fútbol Profesional": "Liga 1",
+    "Ekstraklasa": "Ekstraklasa",
+    "Primeira Liga": "Primeira Liga",
+    "Liga I": "Liga I",
+    "South African Premier Division": "Premier Division",
+    "Russian Premier League": "Premier League",
+    "Scottish Premiership": "Premiership",
+    "Serbian SuperLiga": "SuperLiga",
+    "Swiss Super League": "Super Lg",
+    "Swiss Women's Super League": "Swiss WSL",
+    "Allsvenskan": "Allsvenskan",
+    "Damallsvenskan": "Damallsvenskan",
+    "Süper Lig": "Süper Lig",
+    "Ukrainian Premier League": "Premier League",
+    "Uruguayan Primera División": "Uruguayan Primera División",
+    "Major League Soccer": "MLS",
+    "National Women's Soccer League": "NWSL",
+    "Venezuelan Primera División": "Liga FUTVE",
+    "Challenger Pro League": "Pro League B",
+    "Campeonato Brasileiro Série B": "Série B",
+    "EFL Championship": "Championship",
+    "Spanish Segunda División": "La Liga 2",
+    "Ligue 2": "Ligue 2",
+    "2. Fußball-Bundesliga": "2. Bundesliga",
+    "I-League": "I-League",
+    "Serie B": "Serie B",
+    "J2 League": "J2 League",
+    "Eerste Divisie": "Eerste Divisie",
+    "Scottish Championship": "Championship",
+    "Superettan": "Superettan",
+    "North American Soccer League": "NASL",
+    "USL Championship": "USL Champ",
+    "USL First Division": "USL D-1",
+    "USSF Division 2 Professional League": "D2 Pro League"
+}
 
 # Initialize Selenium WebDriver
 def init_webdriver():
@@ -119,9 +203,20 @@ def normalize_team_name(team_input):
     
     return normalized_team
 
-def extract_league_teams(html):
+def extract_team_urls(url):
     base_url = "https://fbref.com"  # Root URL to prepend to relative links
-    soup = BeautifulSoup(html, "html.parser")
+    response = requests.get(url)
+    if response.status_code != 200:
+        print(f"Failed to retrieve FBref page. Status code: {response.status_code}")
+        return {}, {}  # Return two empty dictionaries
+
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    response = requests.get(url)
+    if response.status_code != 200:
+        print(f"Failed to retrieve FBref league page. Status code: {response.status_code}")
+        return {}, {}  # Return two empty dictionaries
+
     table = soup.find("table", {"id": "stats_squads_standard_for"})
     print(f"Table: {table}")
     
@@ -141,16 +236,42 @@ def extract_league_teams(html):
             #print(f"Cell HTML: {team_links_cell.prettify()}")
             
             link = team_links_cell.find("a")
+            team = team_links_cell.text.strip()
             relative_url = link["href"] if link else None
             team_url = base_url + relative_url
-            team_urls.append(team_url)
+            team_urls.append({'team':team, 'url':team_url})
             #print(f"Extracted URL: {team_url}")  # Debugging line
-    
+
     return team_urls
 
-def extract_match_report_urls(html):
+def get_normalized_league(league):
+    """Returns the normalized version of the league using the mapping."""
+    best_match = None
+    highest_score = 0
+    
+    # Loop through the league mapping to find the best match
+    for official_name, alias in league_mapping.items():
+        score = fuzz.ratio(league.lower(), official_name.lower())
+        if score > highest_score:
+            highest_score = score
+            best_match = alias
+
+    # Ensure that only a close enough match is selected
+    if highest_score > 85:  # Consider only matches with a score above 85
+        return best_match
+    return league  # If no close match is found, return the original league
+
+def extract_match_report_urls(team,url,league):
     base_url = "https://fbref.com"  # Root URL to prepend to relative links
-    soup = BeautifulSoup(html, "html.parser")
+
+    # Normalize the league name using the predefined mapping
+    normalized_league = get_normalized_league(league)
+    response = requests.get(url)
+    if response.status_code != 200:
+        print(f"Failed to retrieve FBref page. Status code: {response.status_code}")
+        return {}, {}  # Return two empty dictionaries
+
+    soup = BeautifulSoup(response.text, 'html.parser')
     table = soup.find("table", {"id": "matchlogs_for"})
     
     if not table:
@@ -161,28 +282,58 @@ def extract_match_report_urls(html):
     rows = table.find("tbody").findAll("tr")
     match_report_urls = []
     
+
+    # Iterate over each row and find the specific td elements
     for row in rows:
-        cells = row.findAll("td")
-        if len(cells) > 0:
-            match_report_cell = cells[-2]
-            # Print cell HTML for debugging
-            #print(f"Cell HTML: {match_report_cell.prettify()}")
-            
-            link = match_report_cell.find("a")
-            relative_url = link["href"] if link else None
-            match_report_url = base_url + relative_url
-            match_report_urls.append(match_report_url)
-            #print(f"Extracted URL: {match_report_url}")  # Debugging line
+        cells = row.find_all(lambda tag: tag.name == 'td' and tag.get('data-stat') in ['comp','opponent', 'match_report'])
+        comp = None
+        opponent = None
+        link = None
+        idx = 0
+        while idx < len(cells):
+            cell = cells[idx]
+            if cell.get('data-stat') == 'comp':
+                comp = cell.text.strip()
+                print(f"Competition found: {comp}, Normalized League: {normalized_league}")
+                # First, check if the competition matches the normalized league name
+                if fuzz.ratio(comp.lower(), normalized_league.lower()) < 70:
+                    # Skip if it doesn't match closely enough
+                    print(f"Skipping competition: {comp}, not matching {normalized_league}")
+                    idx += 3
+                    continue
+            if cell.get('data-stat') == 'opponent':
+                opponent = cell.text.strip() 
+            elif cell.get('data-stat') == 'match_report':
+                link = cell.find('a')['href']
+                match_report_url = base_url + link
+                match_report_urls.append({'team': team, 'opponent': opponent, 'url': match_report_url})
+                print(f"Team: {team}, Opponent: {opponent}, Link: {match_report_url}")  
+            # Move to the next cell
+            idx += 1
     
     return match_report_urls
 
 # Update the main Excel file with Match Report URLs
-def update_match_report_urls(df,urls,team):
-    df["Match Report"] = urls
-    folder_path = os.path.join(os.getcwd(), "Fixtures")
-    filename = os.path.join(folder_path, f"{team}_matches_2024.xlsx")
-    df.to_excel(filename, index=False)
-    print(f"Updated {filename} with Match Report URLs.")
+def update_fixtures_with_match_report_urls(df,team,urls,file):
+    # Ensure the number of URLs matches the number of rows in the DataFrame
+    matching_rows = df[(df['Home'] == team) | (df['Away'] == team)]
+    num_rows = len(matching_rows)
+    num_urls = len(urls)
+    
+    # Avoid index mismatches by limiting the number of URLs or rows
+    if num_rows != num_urls:
+        raise ValueError(f"Warning: Mismatch between {team} DataFrame rows ({num_rows}) and URLs ({num_urls}).")
+    else:
+        #matching_rows["Match Report"] = urls
+        matching_rows.loc[:, "Match Report"] = urls
+
+    # Update the original DataFrame with the new 'Match Report' URLs
+    df.update(matching_rows)
+    
+    #folder_path = os.path.join(os.getcwd())
+    #filename = os.path.join(folder_path, f"Fixtures.xlsx")
+    df.to_excel(file, index=False)
+    print(f"Updated {file} with Match Report URLs.")
 
 # Helper function to extract data from a player stats table
 def extract_player_data(table):
@@ -215,7 +366,7 @@ def extract_player_data(table):
 def extract_player_stats(html, team, opponent):
     respect_fbref_scrape_policy()  # Enforce FBref scrape policy
     soup = BeautifulSoup(html, 'html.parser')
-
+    tables = soup.find_all('table')
     # Prepare team and opponent names
     teams = [team, opponent]
     dfs = []
@@ -228,94 +379,84 @@ def extract_player_stats(html, team, opponent):
         )
 
         # Find the tables corresponding to the team or opponent
-        tables = {'Player Stats': None, 'Goalkeeper Stats': None}
-        for tbl in soup.find_all('table'):
-            caption = tbl.find('caption')
-            if caption:
-                caption_text = caption.get_text(strip=True)
-                for key in tables:
-                    if pattern.search(caption_text) and key in caption_text:
-                        tables[key] = tbl
-
-        # Check for missing tables
-        for key, table in tables.items():
-            if not table:
-                raise ValueError(f"Table with caption containing '{team_with_space}' and '{key} Table' not found.")
+        tables_dict = {'Player Stats': [], 'Goalkeeper Stats': [], 'Shots': []}
+        for table in tables:
+            caption = table.find('caption')
+            caption_text = caption.text.strip() if caption else 'No Caption'
+            for key in tables_dict:
+                if pattern.search(caption_text) and key in caption_text:
+                    tables_dict[key].append(table)
         
-        # Extract data from the tables and append DataFrames
-        for key in tables:
-            df = extract_player_data(tables[key])
-            dfs.append(df)
-    
+        # Extract data from the found tables
+        for key, table_list in tables_dict.items():
+            for table in table_list:
+                df = extract_player_data(table)
+                dfs.append(df)
+
     return dfs
 
 # Save the scraped match report tables to a new Excel file with multiple sheets
-def save_report(dfs, team, opponent, match_number):
-    # Create folder path if it doesn't exist
-    folder_path = f"Match-Reports\{team}"
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-    
-    # Define filename and full file path
-    filename = f"Report Matchday {match_number} - {team} - {opponent}.xlsx"
-    file_path = os.path.join(folder_path, filename)
+def save_report(dfs, team, opponent,report_file):
     
     # Save each dataframe in a separate sheet
-    with pd.ExcelWriter(file_path, engine='xlsxwriter') as writer:
+    with pd.ExcelWriter(report_file, engine='xlsxwriter') as writer:
         # Define sheet names for each DataFrame
         sheet_names = [
-            f"{team} Players",
-            f"{team} Goalkeeper",
-            f"{opponent} Players",
-            f"{opponent} Goalkeeper"
+            f"{team} Summary",
+            f"{team} Pass",
+            f"{team} PassType",
+            f"{team} Def Act",
+            f"{team} Poss",
+            f"{team} Other",
+            f"{team} GK",
+            f"{opponent} Summary",
+            f"{opponent} Pass",
+            f"{opponent} PassType",
+            f"{opponent} Def Act",
+            f"{opponent} Poss",
+            f"{opponent} Other",
+            f"{opponent} GK",
+            "Both Squads",
+            f"{team} Shots",
+            f"{opponent} Shots",
         ]
         
         # Iterate over the list of dataframes and save each one to a different sheet
         for i, df in enumerate(dfs):
             # Ensure sheet names match the order and number of DataFrames
-            sheet_name = sheet_names[i]
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            if i < len(sheet_names):  # Avoid index error if the list of dfs is shorter than sheet names
+                sheet_name = sheet_names[i]
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
     
-    print(f"Saved match report to {file_path}")
-    return file_path
+    print(f"Saved match report to {report_file}")
+    return 
 
-def scrape_and_save_reports(df, driver, team):
+def scrape_and_save_reports(report_url,report_file,match_number,team,opponent):
     
-    for index, row in df.iterrows():
-        match_report_url = row["Match Report"]
-        opponent = row["Opponent"]
-        opponent_normalized = normalize_team_name(opponent)
-        match_number = index + 1  # Match number as a unique identifier
+    # Skip if there's no valid match report URL
+    if not pd.isna(report_url):
+        
+        # Check if the URL contains "stathead" and break if true
+        if "stathead" in report_url:
+            print(f"Skipping Match {match_number} (not yet played): {report_url}")
+            return  # Stop processing further rows
 
-        # Skip if there's no valid match report URL
-        if not pd.isna(match_report_url):
-            
-            # Check if the URL contains "stathead" and break if true
-            if "stathead" in match_report_url:
-                print(f"Skipping Match {match_number} (not yet played): {match_report_url}")
-                break  # Stop processing further rows
+        print(f"Processing Match {match_number}: {team} vs {opponent}")
+        
 
-            print(f"Processing Match {match_number}: {team} vs {opponent_normalized}")
-            
-            # Load match report page
-            html = get_page_content(driver, match_report_url)
-            
-            # Extract list of DataFrames (team and opponent)
-            dfs = extract_player_stats(html, team, opponent_normalized)
-            
-            # Check if both DataFrames are present
-            if all(df is not None for df in dfs):
-                # remove "-" from team name
-                team_with_space = team.replace("-", " ")
-                opponent_with_space = opponent_normalized.replace("-", " ")
-                # Save all DataFrames into the same Excel file, in different sheets
-                file_path = save_report(dfs, team_with_space, opponent_with_space, match_number)
+        response = requests.get(report_url)
 
-                # Optionally update the main Excel file with file paths or other metadata
-                df.at[index, "Match Report"] = file_path
-            
-        else:
-            print(f"No match report found for Match {match_number}")
+        # Extract list of DataFrames (team and opponent)
+        dfs = extract_player_stats(response.text, team, opponent)
+        
+        
+        team_with_space = team.replace("-", " ")
+        opponent_with_space = opponent.replace("-", " ")
+        # Save all DataFrames into the same Excel file, in different sheets
+        save_report(dfs, team_with_space, opponent_with_space,report_file)
+        
+    else:
+        print(f"No match report found for Match {match_number}")
 
 # Check if the urls.xlsx file exists
 def check_url_file_exists():
